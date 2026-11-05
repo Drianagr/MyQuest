@@ -12,11 +12,9 @@ android {
     defaultConfig {
         applicationId = "com.example.myquest"
         minSdk = 24
-        targetSdk = 37
-        versionCode = 1
-        versionName = "1.0"
-
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        targetSdk = 34
+        versionCode = 2          // <--- Súbelo de 1 a 2
+        versionName = "1.1.0"     // <--- Cambia el texto visible
     }
 
     buildTypes {

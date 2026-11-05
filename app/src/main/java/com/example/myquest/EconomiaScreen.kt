@@ -1,5 +1,6 @@
 package com.example.myquest
 
+import android.app.DatePickerDialog
 import android.content.Context
 import android.widget.Toast
 import androidx.compose.foundation.background
@@ -48,6 +49,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import org.json.JSONArray
 import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Locale
 
 // TIPOS DE MONEDA DISPONIBLES
 enum class TipoMoneda(val etiqueta: String, val simbolo: String) {
@@ -80,11 +84,12 @@ data class GastoItem(
     val montoTotal: Double,
     val montoPagado: Double = 0.0,
     val esFijo: Boolean = false,
-    val fechaPago: String = "",
-    val moneda: TipoMoneda = TipoMoneda.DIVISA
+    val fechaPago: String = "", // Formato "yyyy-MM-dd" o solo el día "15" para gastos fijos
+    val moneda: TipoMoneda = TipoMoneda.DIVISA,
+    val ultimoMesCobrado: Int = -1 // Control para no reiniciar el gasto fijo dos veces en el mismo mes
 )
 
-// MODELO DE DATOS: Consumo (con timestamp para auto-eliminación a los 30 días)
+// MODELO DE DATOS: Consumo
 data class ConsumoItem(
     val id: String,
     val nombre: String,
@@ -156,7 +161,7 @@ object StorageUtil {
                         nombre = obj.getString("nombre"),
                         porcentaje = obj.getDouble("porcentaje").toFloat(),
                         acumuladoLocal = obj.optDouble("acumuladoLocal", 0.0),
-                        acumuladoDivisa = obj.optDouble("acumuladoDivisa", obj.optDouble("acumulado", 0.0)),
+                        acumuladoDivisa = obj.optDouble("acumuladoDivisa", 0.0),
                         acumuladoUsdt = obj.optDouble("acumuladoUsdt", 0.0)
                     )
                 )
@@ -177,6 +182,7 @@ object StorageUtil {
             obj.put("esFijo", item.esFijo)
             obj.put("fechaPago", item.fechaPago)
             obj.put("moneda", item.moneda.name)
+            obj.put("ultimoMesCobrado", item.ultimoMesCobrado)
             jsonArray.put(obj)
         }
         prefs.edit().putString(KEY_GASTOS, jsonArray.toString()).apply()
@@ -199,7 +205,8 @@ object StorageUtil {
                         montoPagado = obj.getDouble("montoPagado"),
                         esFijo = obj.optBoolean("esFijo", false),
                         fechaPago = obj.optString("fechaPago", ""),
-                        moneda = try { TipoMoneda.valueOf(mStr) } catch (_: Exception) { TipoMoneda.DIVISA }
+                        moneda = try { TipoMoneda.valueOf(mStr) } catch (_: Exception) { TipoMoneda.DIVISA },
+                        ultimoMesCobrado = obj.optInt("ultimoMesCobrado", -1)
                     )
                 )
             }
@@ -284,6 +291,7 @@ fun PantallaEconomia() {
     var montoGastoInput by remember { mutableStateOf("") }
     var esGastoFijoInput by remember { mutableStateOf(false) }
     var fechaPagoGastoInput by remember { mutableStateOf("") }
+    var diaFijoSeleccionado by remember { mutableStateOf("1") }
     var monedaGastoInput by remember { mutableStateOf(TipoMoneda.DIVISA) }
 
     var mostrarDialogoAgregarConsumo by remember { mutableStateOf(false) }
@@ -301,12 +309,34 @@ fun PantallaEconomia() {
         StorageUtil.guardarConsumos(context, listaConsumos)
     }
 
+    // Comprobación de gastos fijos según la fecha del sistema
     LaunchedEffect(Unit) {
+        val calendarioHoy = Calendar.getInstance()
+        val diaHoy = calendarioHoy.get(Calendar.DAY_OF_MONTH)
+        val mesHoy = calendarioHoy.get(Calendar.MONTH)
+
+        var huboCambios = false
+        for (i in listaGastos.indices) {
+            val gasto = listaGastos[i]
+            if (gasto.esFijo) {
+                val diaCobro = gasto.fechaPago.toIntOrNull() ?: 1
+                if (diaHoy >= diaCobro && gasto.ultimoMesCobrado != mesHoy) {
+                    // Se reanuda el monto pendiente y se marca el mes cobrado
+                    listaGastos[i] = gasto.copy(
+                        montoPagado = 0.0,
+                        ultimoMesCobrado = mesHoy
+                    )
+                    huboCambios = true
+                }
+            }
+        }
+
         val unMesEnMs = 30L * 24 * 60 * 60 * 1000
         val ahora = System.currentTimeMillis()
         val consumosAntes = listaConsumos.size
         listaConsumos.removeAll { ahora - it.timestamp > unMesEnMs }
-        if (consumosAntes != listaConsumos.size) {
+
+        if (huboCambios || consumosAntes != listaConsumos.size) {
             guardarTodo()
         }
     }
@@ -350,7 +380,7 @@ fun PantallaEconomia() {
         modifier = Modifier.fillMaxSize().padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // TARJETA DE SALDOS DESGLOSADOS (Formato de filas reorganizado)
+        // TARJETA DE SALDOS DESGLOSADOS
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
@@ -358,10 +388,8 @@ fun PantallaEconomia() {
             Column(modifier = Modifier.padding(16.dp)) {
                 Text(text = "Saldos Disponibles", style = MaterialTheme.typography.titleMedium)
                 Spacer(modifier = Modifier.height(8.dp))
-                // Fila 1: Solo Local (Bs.)
                 Text(text = "Local: ${TipoMoneda.LOCAL.simbolo}${saldos.local}")
                 Spacer(modifier = Modifier.height(4.dp))
-                // Fila 2: Divisa ($) y USDT debajo de la de Bs.
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text(text = "Divisa: ${TipoMoneda.DIVISA.simbolo}${saldos.divisa}")
                     Text(text = "USDT: ${saldos.usdt} USDT")
@@ -475,6 +503,7 @@ fun PantallaEconomia() {
                         montoGastoInput = ""
                         esGastoFijoInput = false
                         fechaPagoGastoInput = ""
+                        diaFijoSeleccionado = "1"
                         monedaGastoInput = TipoMoneda.DIVISA
                         mostrarDialogoAgregarGasto = true
                     }
@@ -554,6 +583,19 @@ fun PantallaEconomia() {
     }
 
     if (mostrarDialogoAgregarGasto) {
+        val calendario = Calendar.getInstance()
+        val datePickerDialog = DatePickerDialog(
+            context,
+            { _, year, month, dayOfMonth ->
+                val mesFormateado = String.format("%02d", month + 1)
+                val diaFormateado = String.format("%02d", dayOfMonth)
+                fechaPagoGastoInput = "$year-$mesFormateado-$diaFormateado"
+            },
+            calendario.get(Calendar.YEAR),
+            calendario.get(Calendar.MONTH),
+            calendario.get(Calendar.DAY_OF_MONTH)
+        )
+
         AlertDialog(
             onDismissRequest = { mostrarDialogoAgregarGasto = false },
             title = { Text("Crear Nuevo Gasto / Deuda") },
@@ -563,7 +605,42 @@ fun PantallaEconomia() {
                     Spacer(modifier = Modifier.height(8.dp))
                     OutlinedTextField(value = montoGastoInput, onValueChange = { montoGastoInput = it }, label = { Text("Monto Total") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done))
                     Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(value = fechaPagoGastoInput, onValueChange = { fechaPagoGastoInput = it }, label = { Text("Fecha límite de pago") }, singleLine = true)
+
+                    Text(text = "Tipo de gasto:", style = MaterialTheme.typography.bodyMedium)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        RadioButton(selected = !esGastoFijoInput, onClick = { esGastoFijoInput = false })
+                        Text(text = "Deuda (Puntual)")
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        RadioButton(selected = esGastoFijoInput, onClick = { esGastoFijoInput = true })
+                        Text(text = "Gasto Fijo (Recurrente mensual)")
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    if (esGastoFijoInput) {
+                        Text(text = "Día del mes para pago recurrente:", style = MaterialTheme.typography.bodyMedium)
+                        OutlinedTextField(
+                            value = diaFijoSeleccionado,
+                            onValueChange = { nuevoDia ->
+                                val num = nuevoDia.toIntOrNull()
+                                if (nuevoDia.isEmpty() || (num != null && num in 1..31)) {
+                                    diaFijoSeleccionado = nuevoDia
+                                }
+                            },
+                            label = { Text("Día (1 - 31)") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done)
+                        )
+                    } else {
+                        OutlinedTextField(
+                            value = fechaPagoGastoInput,
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Fecha límite (Toca para elegir)") },
+                            modifier = Modifier.fillMaxWidth().clickable { datePickerDialog.show() }
+                        )
+                    }
+
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(text = "Moneda:", style = MaterialTheme.typography.bodyMedium)
                     TipoMoneda.values().forEach { m ->
@@ -572,22 +649,14 @@ fun PantallaEconomia() {
                             Text(text = m.etiqueta)
                         }
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(text = "Tipo de gasto:", style = MaterialTheme.typography.bodyMedium)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        RadioButton(selected = !esGastoFijoInput, onClick = { esGastoFijoInput = false })
-                        Text(text = "Deuda (se elimina al pagar)")
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        RadioButton(selected = esGastoFijoInput, onClick = { esGastoFijoInput = true })
-                        Text(text = "Gasto Fijo (se mantiene en $0)")
-                    }
                 }
             },
             confirmButton = {
                 Button(onClick = {
                     val m = montoGastoInput.toDoubleOrNull() ?: 0.0
-                    if (nombreGastoInput.isNotBlank() && m > 0) {
+                    val fechaDefinitiva = if (esGastoFijoInput) diaFijoSeleccionado else fechaPagoGastoInput
+
+                    if (nombreGastoInput.isNotBlank() && m > 0 && fechaDefinitiva.isNotBlank()) {
                         listaGastos.add(
                             GastoItem(
                                 id = System.currentTimeMillis().toString(),
@@ -595,12 +664,14 @@ fun PantallaEconomia() {
                                 montoTotal = m,
                                 montoPagado = 0.0,
                                 esFijo = esGastoFijoInput,
-                                fechaPago = fechaPagoGastoInput,
+                                fechaPago = fechaDefinitiva,
                                 moneda = monedaGastoInput
                             )
                         )
                         mostrarDialogoAgregarGasto = false
                         guardarTodo()
+                    } else {
+                        Toast.makeText(context, "Por favor completa todos los campos", Toast.LENGTH_SHORT).show()
                     }
                 }) { Text("Guardar") }
             },
@@ -1023,7 +1094,7 @@ fun VistaDetalleAhorros(
     }
 }
 
-// --- VISTA DETALLADA DE GASTOS CON REGISTRO INDEPENDIENTE DE CADA PAGO EN CONSUMOS ---
+// --- VISTA DETALLADA DE GASTOS ---
 @Composable
 fun VistaDetalleGastos(
     listaGastos: MutableList<GastoItem>,
@@ -1045,6 +1116,7 @@ fun VistaDetalleGastos(
     var montoGastoInput by remember { mutableStateOf("") }
     var esGastoFijoInput by remember { mutableStateOf(false) }
     var fechaPagoGastoInput by remember { mutableStateOf("") }
+    var diaFijoSeleccionado by remember { mutableStateOf("1") }
     var monedaGastoInput by remember { mutableStateOf(TipoMoneda.DIVISA) }
 
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -1060,6 +1132,7 @@ fun VistaDetalleGastos(
                     montoGastoInput = ""
                     esGastoFijoInput = false
                     fechaPagoGastoInput = ""
+                    diaFijoSeleccionado = "1"
                     monedaGastoInput = TipoMoneda.DIVISA
                     mostrarDialogoCrearGasto = true
                 },
@@ -1072,13 +1145,15 @@ fun VistaDetalleGastos(
             LazyColumn(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(listaGastos) { gasto ->
                     val pendiente = (gasto.montoTotal - gasto.montoPagado).coerceAtLeast(0.0)
+                    val textoFecha = if (gasto.esFijo) "Día ${gasto.fechaPago} de cada mes" else "Límite: ${gasto.fechaPago}"
+
                     Card(modifier = Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
                         Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                 Text(text = gasto.nombre, style = MaterialTheme.typography.titleMedium)
                                 Text(text = gasto.moneda.etiqueta, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
                             }
-                            Text(text = "Tipo: ${if (gasto.esFijo) "Gasto Fijo" else "Deuda"} | Fecha: ${gasto.fechaPago.ifEmpty { "N/A" }}", style = MaterialTheme.typography.bodySmall)
+                            Text(text = "Tipo: ${if (gasto.esFijo) "Gasto Fijo" else "Deuda"} | $textoFecha", style = MaterialTheme.typography.bodySmall)
                             Text(text = "Total: ${gasto.moneda.simbolo}${gasto.montoTotal} | Pendiente: ${gasto.moneda.simbolo}$pendiente", style = MaterialTheme.typography.bodyMedium, color = Color.Red)
                             Spacer(modifier = Modifier.height(8.dp))
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -1093,6 +1168,19 @@ fun VistaDetalleGastos(
     }
 
     if (mostrarDialogoCrearGasto) {
+        val calendario = Calendar.getInstance()
+        val datePickerDialog = DatePickerDialog(
+            context,
+            { _, year, month, dayOfMonth ->
+                val mesFormateado = String.format("%02d", month + 1)
+                val diaFormateado = String.format("%02d", dayOfMonth)
+                fechaPagoGastoInput = "$year-$mesFormateado-$diaFormateado"
+            },
+            calendario.get(Calendar.YEAR),
+            calendario.get(Calendar.MONTH),
+            calendario.get(Calendar.DAY_OF_MONTH)
+        )
+
         AlertDialog(
             onDismissRequest = { mostrarDialogoCrearGasto = false },
             title = { Text("Crear Nuevo Gasto / Deuda") },
@@ -1102,7 +1190,42 @@ fun VistaDetalleGastos(
                     Spacer(modifier = Modifier.height(8.dp))
                     OutlinedTextField(value = montoGastoInput, onValueChange = { montoGastoInput = it }, label = { Text("Monto Total") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done))
                     Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(value = fechaPagoGastoInput, onValueChange = { fechaPagoGastoInput = it }, label = { Text("Fecha límite de pago") }, singleLine = true)
+
+                    Text(text = "Tipo de gasto:", style = MaterialTheme.typography.bodyMedium)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        RadioButton(selected = !esGastoFijoInput, onClick = { esGastoFijoInput = false })
+                        Text(text = "Deuda (Puntual)")
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        RadioButton(selected = esGastoFijoInput, onClick = { esGastoFijoInput = true })
+                        Text(text = "Gasto Fijo (Recurrente mensual)")
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    if (esGastoFijoInput) {
+                        Text(text = "Día del mes para pago recurrente:", style = MaterialTheme.typography.bodyMedium)
+                        OutlinedTextField(
+                            value = diaFijoSeleccionado,
+                            onValueChange = { nuevoDia ->
+                                val num = nuevoDia.toIntOrNull()
+                                if (nuevoDia.isEmpty() || (num != null && num in 1..31)) {
+                                    diaFijoSeleccionado = nuevoDia
+                                }
+                            },
+                            label = { Text("Día (1 - 31)") },
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done)
+                        )
+                    } else {
+                        OutlinedTextField(
+                            value = fechaPagoGastoInput,
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("Fecha límite (Toca para elegir)") },
+                            modifier = Modifier.fillMaxWidth().clickable { datePickerDialog.show() }
+                        )
+                    }
+
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(text = "Moneda:", style = MaterialTheme.typography.bodyMedium)
                     TipoMoneda.values().forEach { m ->
@@ -1111,22 +1234,14 @@ fun VistaDetalleGastos(
                             Text(text = m.etiqueta)
                         }
                     }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(text = "Tipo de gasto:", style = MaterialTheme.typography.bodyMedium)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        RadioButton(selected = !esGastoFijoInput, onClick = { esGastoFijoInput = false })
-                        Text(text = "Deuda (se elimina al pagar)")
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        RadioButton(selected = esGastoFijoInput, onClick = { esGastoFijoInput = true })
-                        Text(text = "Gasto Fijo (se mantiene en $0)")
-                    }
                 }
             },
             confirmButton = {
                 Button(onClick = {
                     val m = montoGastoInput.toDoubleOrNull() ?: 0.0
-                    if (nombreGastoInput.isNotBlank() && m > 0) {
+                    val fechaDefinitiva = if (esGastoFijoInput) diaFijoSeleccionado else fechaPagoGastoInput
+
+                    if (nombreGastoInput.isNotBlank() && m > 0 && fechaDefinitiva.isNotBlank()) {
                         listaGastos.add(
                             GastoItem(
                                 id = System.currentTimeMillis().toString(),
@@ -1134,12 +1249,14 @@ fun VistaDetalleGastos(
                                 montoTotal = m,
                                 montoPagado = 0.0,
                                 esFijo = esGastoFijoInput,
-                                fechaPago = fechaPagoGastoInput,
+                                fechaPago = fechaDefinitiva,
                                 moneda = monedaGastoInput
                             )
                         )
                         mostrarDialogoCrearGasto = false
                         onGuardarCambios()
+                    } else {
+                        Toast.makeText(context, "Por favor completa todos los campos", Toast.LENGTH_SHORT).show()
                     }
                 }) { Text("Guardar") }
             },
@@ -1265,7 +1382,6 @@ fun VistaDetalleGastos(
                             }
 
                             if (fuenteSeleccionada != "EXTERNO") {
-                                // ID único garantizado con un número aleatorio para que cada pago sucesivo se registre sin problemas
                                 listaConsumos.add(
                                     ConsumoItem(
                                         id = "${System.currentTimeMillis()}-${(0..99999).random()}",
