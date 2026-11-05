@@ -84,9 +84,9 @@ data class GastoItem(
     val montoTotal: Double,
     val montoPagado: Double = 0.0,
     val esFijo: Boolean = false,
-    val fechaPago: String = "", // Formato "yyyy-MM-dd" o solo el día "15" para gastos fijos
+    val fechaPago: String = "",
     val moneda: TipoMoneda = TipoMoneda.DIVISA,
-    val ultimoMesCobrado: Int = -1 // Control para no reiniciar el gasto fijo dos veces en el mismo mes
+    val ultimoMesCobrado: Int = -1
 )
 
 // MODELO DE DATOS: Consumo
@@ -309,7 +309,6 @@ fun PantallaEconomia() {
         StorageUtil.guardarConsumos(context, listaConsumos)
     }
 
-    // Comprobación de gastos fijos según la fecha del sistema
     LaunchedEffect(Unit) {
         val calendarioHoy = Calendar.getInstance()
         val diaHoy = calendarioHoy.get(Calendar.DAY_OF_MONTH)
@@ -321,7 +320,6 @@ fun PantallaEconomia() {
             if (gasto.esFijo) {
                 val diaCobro = gasto.fechaPago.toIntOrNull() ?: 1
                 if (diaHoy >= diaCobro && gasto.ultimoMesCobrado != mesHoy) {
-                    // Se reanuda el monto pendiente y se marca el mes cobrado
                     listaGastos[i] = gasto.copy(
                         montoPagado = 0.0,
                         ultimoMesCobrado = mesHoy
@@ -380,7 +378,6 @@ fun PantallaEconomia() {
         modifier = Modifier.fillMaxSize().padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        // TARJETA DE SALDOS DESGLOSADOS
         Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)
@@ -406,7 +403,6 @@ fun PantallaEconomia() {
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        // SECTOR DE INGRESO
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -632,13 +628,21 @@ fun PantallaEconomia() {
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done)
                         )
                     } else {
-                        OutlinedTextField(
-                            value = fechaPagoGastoInput,
-                            onValueChange = {},
-                            readOnly = true,
-                            label = { Text("Fecha límite (Toca para elegir)") },
-                            modifier = Modifier.fillMaxWidth().clickable { datePickerDialog.show() }
-                        )
+                        // AQUÍ ESTÁ EL CAMBIO DEL CAJÓN TÁCTIL (BOX + CLICKABLE)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { datePickerDialog.show() }
+                        ) {
+                            OutlinedTextField(
+                                value = fechaPagoGastoInput,
+                                onValueChange = {},
+                                readOnly = true,
+                                enabled = false,
+                                label = { Text("Fecha límite (Toca para elegir)") },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(12.dp))
@@ -1217,13 +1221,21 @@ fun VistaDetalleGastos(
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done)
                         )
                     } else {
-                        OutlinedTextField(
-                            value = fechaPagoGastoInput,
-                            onValueChange = {},
-                            readOnly = true,
-                            label = { Text("Fecha límite (Toca para elegir)") },
-                            modifier = Modifier.fillMaxWidth().clickable { datePickerDialog.show() }
-                        )
+                        // AQUÍ ESTÁ EL CAMBIO DEL CAJÓN TÁCTIL (BOX + CLICKABLE)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { datePickerDialog.show() }
+                        ) {
+                            OutlinedTextField(
+                                value = fechaPagoGastoInput,
+                                onValueChange = {},
+                                readOnly = true,
+                                enabled = false,
+                                label = { Text("Fecha límite (Toca para elegir)") },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
                     }
 
                     Spacer(modifier = Modifier.height(12.dp))
