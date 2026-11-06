@@ -396,7 +396,7 @@ fun PantallaEconomia() {
                     onClick = { mostrarDialogoConvertidorGeneral = true },
                     modifier = Modifier.align(Alignment.End)
                 ) {
-                    Text("🔄 Convertir / Cambiar Saldos")
+                    Text("🔄 Editar / Convertir")
                 }
             }
         }
@@ -519,32 +519,37 @@ fun PantallaEconomia() {
         }
     }
 
+    // DIÁLOGO GENERAL DE EDICIÓN / INTERCAMBIO DIRECTO (Saldos)
     if (mostrarDialogoConvertidorGeneral) {
-        DialogoConvertidor(
-            titulo = "Intercambio de Saldos",
+        DialogoEdicionSaldos(
+            saldosActuales = saldos,
             onDismiss = { mostrarDialogoConvertidorGeneral = false },
-            onConfirmarConversion = { origen, destino, montoOrigen, tasa ->
-                val montoDestino = montoOrigen * tasa
+            onGuardarCambiosDirectos = { nuevosSaldos ->
+                saldos = nuevosSaldos
+                guardarTodo()
+                mostrarDialogoConvertidorGeneral = false
+            },
+            onConfirmarCambio = { origen, destino, montoSalida, montoEntrada ->
                 var exito = false
 
                 val saldosTemp = when (origen) {
-                    TipoMoneda.LOCAL -> if (saldos.local >= montoOrigen) saldos.copy(local = saldos.local - montoOrigen) else null
-                    TipoMoneda.DIVISA -> if (saldos.divisa >= montoOrigen) saldos.copy(divisa = saldos.divisa - montoOrigen) else null
-                    TipoMoneda.USDT -> if (saldos.usdt >= montoOrigen) saldos.copy(usdt = saldos.usdt - montoOrigen) else null
+                    TipoMoneda.LOCAL -> if (saldos.local >= montoSalida) saldos.copy(local = saldos.local - montoSalida) else null
+                    TipoMoneda.DIVISA -> if (saldos.divisa >= montoSalida) saldos.copy(divisa = saldos.divisa - montoSalida) else null
+                    TipoMoneda.USDT -> if (saldos.usdt >= montoSalida) saldos.copy(usdt = saldos.usdt - montoSalida) else null
                 }
 
                 if (saldosTemp != null) {
                     saldos = when (destino) {
-                        TipoMoneda.LOCAL -> saldosTemp.copy(local = saldosTemp.local + montoDestino)
-                        TipoMoneda.DIVISA -> saldosTemp.copy(divisa = saldosTemp.divisa + montoDestino)
-                        TipoMoneda.USDT -> saldosTemp.copy(usdt = saldosTemp.usdt + montoDestino)
+                        TipoMoneda.LOCAL -> saldosTemp.copy(local = saldosTemp.local + montoEntrada)
+                        TipoMoneda.DIVISA -> saldosTemp.copy(divisa = saldosTemp.divisa + montoEntrada)
+                        TipoMoneda.USDT -> saldosTemp.copy(usdt = saldosTemp.usdt + montoEntrada)
                     }
                     guardarTodo()
                     exito = true
                 }
 
                 if (!exito) {
-                    Toast.makeText(context, "Saldo insuficiente para convertir", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "Saldo insuficiente en la moneda de origen", Toast.LENGTH_SHORT).show()
                 }
                 mostrarDialogoConvertidorGeneral = false
             }
@@ -628,7 +633,6 @@ fun PantallaEconomia() {
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done)
                         )
                     } else {
-                        // AQUÍ ESTÁ EL CAMBIO DEL CAJÓN TÁCTIL (BOX + CLICKABLE)
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -754,48 +758,99 @@ fun PantallaEconomia() {
     }
 }
 
-// --- DIÁLOGO CONVERTIDOR GENÉRICO ---
+// --- DIÁLOGO DE EDICIÓN Y CONVERSIÓN DE SALDOS ---
 @Composable
-fun DialogoConvertidor(
-    titulo: String,
+fun DialogoEdicionSaldos(
+    saldosActuales: SaldosMultiMoneda,
     onDismiss: () -> Unit,
-    onConfirmarConversion: (origen: TipoMoneda, destino: TipoMoneda, montoOrigen: Double, tasa: Double) -> Unit
+    onGuardarCambiosDirectos: (SaldosMultiMoneda) -> Unit,
+    onConfirmarCambio: (origen: TipoMoneda, destino: TipoMoneda, montoSalida: Double, montoEntrada: Double) -> Unit
 ) {
+    var modo by remember { mutableStateOf("INTERCAMBIO") } // "INTERCAMBIO" o "EDITAR_DIRECTO"
+
     var origen by remember { mutableStateOf(TipoMoneda.LOCAL) }
     var destino by remember { mutableStateOf(TipoMoneda.DIVISA) }
-    var montoInput by remember { mutableStateOf("") }
-    var tasaInput by remember { mutableStateOf("") }
+    var montoSalidaInput by remember { mutableStateOf("") }
+    var montoEntradaInput by remember { mutableStateOf("") }
+
+    var editLocal by remember { mutableStateOf(saldosActuales.local.toString()) }
+    var editDivisa by remember { mutableStateOf(saldosActuales.divisa.toString()) }
+    var editUsdt by remember { mutableStateOf(saldosActuales.usdt.toString()) }
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(titulo) },
+        title = { Text("Editar / Convertir Saldos") },
         text = {
             Column {
-                Text(text = "Moneda de Origen:", style = MaterialTheme.typography.bodyMedium)
-                TipoMoneda.values().forEach { m ->
-                    TextButton(onClick = { origen = m }) { Text(if (origen == m) "✔ ${m.etiqueta}" else m.etiqueta) }
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    Button(onClick = { modo = "INTERCAMBIO" }, enabled = modo != "INTERCAMBIO") { Text("Cambio / Compra") }
+                    Button(onClick = { modo = "EDITAR_DIRECTO" }, enabled = modo != "EDITAR_DIRECTO") { Text("Editar Montos") }
                 }
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(text = "Moneda de Destino:", style = MaterialTheme.typography.bodyMedium)
-                TipoMoneda.values().forEach { m ->
-                    if (m != origen) {
-                        TextButton(onClick = { destino = m }) { Text(if (destino == m) "✔ ${m.etiqueta}" else m.etiqueta) }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                if (modo == "INTERCAMBIO") {
+                    Text(text = "1. Moneda de Origen (Lo que gastas/sacas):", style = MaterialTheme.typography.bodyMedium)
+                    TipoMoneda.values().forEach { m ->
+                        val saldoDisp = when(m) {
+                            TipoMoneda.LOCAL -> saldosActuales.local
+                            TipoMoneda.DIVISA -> saldosActuales.divisa
+                            TipoMoneda.USDT -> saldosActuales.usdt
+                        }
+                        TextButton(onClick = { origen = m }) {
+                            Text(if (origen == m) "✔ ${m.etiqueta} (Disp: ${m.simbolo}$saldoDisp)" else "${m.etiqueta} (Disp: ${m.simbolo}$saldoDisp)")
+                        }
                     }
+
+                    OutlinedTextField(
+                        value = montoSalidaInput,
+                        onValueChange = { montoSalidaInput = it },
+                        label = { Text("Monto a retirar (${origen.simbolo})") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done)
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(text = "2. Moneda de Destino (Lo que recibes/compras):", style = MaterialTheme.typography.bodyMedium)
+                    TipoMoneda.values().forEach { m ->
+                        if (m != origen) {
+                            TextButton(onClick = { destino = m }) {
+                                Text(if (destino == m) "✔ ${m.etiqueta}" else m.etiqueta)
+                            }
+                        }
+                    }
+
+                    OutlinedTextField(
+                        value = montoEntradaInput,
+                        onValueChange = { montoEntradaInput = it },
+                        label = { Text("Monto a abonar (${destino.simbolo})") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done)
+                    )
+                } else {
+                    Text(text = "Corrige directamente los saldos si te equivocaste:", style = MaterialTheme.typography.bodyMedium)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    OutlinedTextField(value = editLocal, onValueChange = { editLocal = it }, label = { Text("Saldo Local (Bs.)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done))
+                    Spacer(modifier = Modifier.height(4.dp))
+                    OutlinedTextField(value = editDivisa, onValueChange = { editDivisa = it }, label = { Text("Saldo Divisa ($)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done))
+                    Spacer(modifier = Modifier.height(4.dp))
+                    OutlinedTextField(value = editUsdt, onValueChange = { editUsdt = it }, label = { Text("Saldo USDT") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done))
                 }
-                Spacer(modifier = Modifier.height(8.dp))
-                OutlinedTextField(value = montoInput, onValueChange = { montoInput = it }, label = { Text("Monto a convertir (${origen.simbolo})") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done))
-                Spacer(modifier = Modifier.height(8.dp))
-                OutlinedTextField(value = tasaInput, onValueChange = { tasaInput = it }, label = { Text("Tasa (1 ${origen.simbolo} = ? ${destino.simbolo})") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done))
             }
         },
         confirmButton = {
             Button(onClick = {
-                val monto = montoInput.toDoubleOrNull() ?: 0.0
-                val tasa = tasaInput.toDoubleOrNull() ?: 0.0
-                if (monto > 0 && tasa > 0 && origen != destino) {
-                    onConfirmarConversion(origen, destino, monto, tasa)
+                if (modo == "INTERCAMBIO") {
+                    val salida = montoSalidaInput.toDoubleOrNull() ?: 0.0
+                    val entrada = montoEntradaInput.toDoubleOrNull() ?: 0.0
+                    if (salida > 0 && entrada > 0 && origen != destino) {
+                        onConfirmarCambio(origen, destino, salida, entrada)
+                    }
+                } else {
+                    val l = editLocal.toDoubleOrNull() ?: saldosActuales.local
+                    val d = editDivisa.toDoubleOrNull() ?: saldosActuales.divisa
+                    val u = editUsdt.toDoubleOrNull() ?: saldosActuales.usdt
+                    onGuardarCambiosDirectos(SaldosMultiMoneda(local = l, divisa = d, usdt = u))
                 }
-            }) { Text("Confirmar") }
+            }) { Text(if (modo == "INTERCAMBIO") "Confirmar Cambio" else "Guardar Cambios") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } }
     )
@@ -816,9 +871,8 @@ fun VistaDetalleAhorros(
     var nombreInput by remember { mutableStateOf("") }
     var porcentajeInput by remember { mutableStateOf("") }
 
+    // Estado para el botón "Editar" en Ahorros (Mantiene el nombre exacto "Editar")
     var ahorroEnEdicion by remember { mutableStateOf<AhorroItem?>(null) }
-    var nuevoNombreEdicion by remember { mutableStateOf("") }
-    var nuevoPorcentajeEdicion by remember { mutableStateOf("") }
 
     var ahorroParaAbono by remember { mutableStateOf<AhorroItem?>(null) }
     var montoAbonoInput by remember { mutableStateOf("") }
@@ -827,12 +881,6 @@ fun VistaDetalleAhorros(
     var ahorroParaRetiro by remember { mutableStateOf<AhorroItem?>(null) }
     var montoRetiroInput by remember { mutableStateOf("") }
     var monedaRetiroSeleccionada by remember { mutableStateOf(TipoMoneda.DIVISA) }
-
-    var ahorroParaConvertir by remember { mutableStateOf<AhorroItem?>(null) }
-    var origenConvertir by remember { mutableStateOf(TipoMoneda.LOCAL) }
-    var destinoConvertir by remember { mutableStateOf(TipoMoneda.DIVISA) }
-    var montoConvertirInput by remember { mutableStateOf("") }
-    var tasaConvertirInput by remember { mutableStateOf("") }
 
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(modifier = Modifier.fillMaxSize().padding(24.dp)) {
@@ -857,18 +905,10 @@ fun VistaDetalleAhorros(
                             Text(text = "• USDT: ${ahorro.acumuladoUsdt} USDT", style = MaterialTheme.typography.bodySmall)
                             Spacer(modifier = Modifier.height(8.dp))
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                                TextButton(onClick = {
-                                    ahorroParaConvertir = ahorro
-                                    montoConvertirInput = ""
-                                    tasaConvertirInput = ""
-                                }) { Text("Convertir", color = Color(0xFF1E88E5)) }
                                 TextButton(onClick = { ahorroParaRetiro = ahorro; montoRetiroInput = "" }) { Text("Retirar", color = Color(0xFFE53935)) }
                                 TextButton(onClick = { ahorroParaAbono = ahorro; montoAbonoInput = "" }) { Text("Abonar") }
-                                TextButton(onClick = {
-                                    ahorroEnEdicion = ahorro
-                                    nuevoNombreEdicion = ahorro.nombre
-                                    nuevoPorcentajeEdicion = ahorro.porcentaje.toString()
-                                }) { Text("Editar") }
+                                // Botón que mantiene el nombre de "Editar"
+                                TextButton(onClick = { ahorroEnEdicion = ahorro }) { Text("Editar") }
                                 TextButton(onClick = { onEliminar(ahorro) }) { Text("Eliminar", color = Color.Red) }
                             }
                         }
@@ -905,27 +945,105 @@ fun VistaDetalleAhorros(
         )
     }
 
+    // DIÁLOGO DE EDICIÓN PARA EL AHORRO SELECCIONADO (Nombre, % y conversión interna o corrección de montos)
     if (ahorroEnEdicion != null) {
+        val metaActual = ahorroEnEdicion!!
+        var subModo by remember { mutableStateOf("GENERAL") } // "GENERAL" o "CONVERTIR_INTERNO" o "CORREGIR_MONTOS"
+
+        var nuevoNombre by remember { mutableStateOf(metaActual.nombre) }
+        var nuevoPorcentaje by remember { mutableStateOf(metaActual.porcentaje.toString()) }
+
+        var origenAho by remember { mutableStateOf(TipoMoneda.LOCAL) }
+        var destinoAho by remember { mutableStateOf(TipoMoneda.DIVISA) }
+        var montoSalidaAho by remember { mutableStateOf("") }
+        var montoEntradaAho by remember { mutableStateOf("") }
+
+        var corrLocal by remember { mutableStateOf(metaActual.acumuladoLocal.toString()) }
+        var corrDivisa by remember { mutableStateOf(metaActual.acumuladoDivisa.toString()) }
+        var corrUsdt by remember { mutableStateOf(metaActual.acumuladoUsdt.toString()) }
+
         AlertDialog(
             onDismissRequest = { ahorroEnEdicion = null },
-            title = { Text("Editar Meta de Ahorro") },
+            title = { Text("Editar Meta: ${metaActual.nombre}") },
             text = {
                 Column {
-                    OutlinedTextField(value = nuevoNombreEdicion, onValueChange = { nuevoNombreEdicion = it }, label = { Text("Nombre") })
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        TextButton(onClick = { subModo = "GENERAL" }, enabled = subModo != "GENERAL") { Text("Datos") }
+                        TextButton(onClick = { subModo = "CONVERTIR_INTERNO" }, enabled = subModo != "CONVERTIR_INTERNO") { Text("Intercambio") }
+                        TextButton(onClick = { subModo = "CORREGIR_MONTOS" }, enabled = subModo != "CORREGIR_MONTOS") { Text("Montos") }
+                    }
                     Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(value = nuevoPorcentajeEdicion, onValueChange = { nuevoPorcentajeEdicion = it }, label = { Text("Porcentaje (%)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done))
+
+                    if (subModo == "GENERAL") {
+                        OutlinedTextField(value = nuevoNombre, onValueChange = { nuevoNombre = it }, label = { Text("Nombre") })
+                        Spacer(modifier = Modifier.height(8.dp))
+                        OutlinedTextField(value = nuevoPorcentaje, onValueChange = { nuevoPorcentaje = it }, label = { Text("Porcentaje (%)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done))
+                    } else if (subModo == "CONVERTIR_INTERNO") {
+                        Text(text = "Intercambia fondos dentro de este ahorro:", style = MaterialTheme.typography.bodySmall)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(text = "Origen (Saca):")
+                        TipoMoneda.values().forEach { m ->
+                            val disp = when(m) { TipoMoneda.LOCAL -> metaActual.acumuladoLocal; TipoMoneda.DIVISA -> metaActual.acumuladoDivisa; TipoMoneda.USDT -> metaActual.acumuladoUsdt }
+                            TextButton(onClick = { origenAho = m }) { Text(if (origenAho == m) "✔ ${m.etiqueta} ($disp)" else "${m.etiqueta} ($disp)") }
+                        }
+                        OutlinedTextField(value = montoSalidaAho, onValueChange = { montoSalidaAho = it }, label = { Text("Monto a retirar") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done))
+
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(text = "Destino (Pone):")
+                        TipoMoneda.values().forEach { m ->
+                            if (m != origenAho) {
+                                TextButton(onClick = { destinoAho = m }) { Text(if (destinoAho == m) "✔ ${m.etiqueta}" else m.etiqueta) }
+                            }
+                        }
+                        OutlinedTextField(value = montoEntradaAho, onValueChange = { montoEntradaAho = it }, label = { Text("Monto a abonar") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done))
+                    } else {
+                        Text(text = "Corrige montos acumulados si hubo error:", style = MaterialTheme.typography.bodySmall)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        OutlinedTextField(value = corrLocal, onValueChange = { corrLocal = it }, label = { Text("Acumulado Local (Bs.)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done))
+                        Spacer(modifier = Modifier.height(4.dp))
+                        OutlinedTextField(value = corrDivisa, onValueChange = { corrDivisa = it }, label = { Text("Acumulado Divisa ($)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done))
+                        Spacer(modifier = Modifier.height(4.dp))
+                        OutlinedTextField(value = corrUsdt, onValueChange = { corrUsdt = it }, label = { Text("Acumulado USDT") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done))
+                    }
                 }
             },
             confirmButton = {
                 Button(onClick = {
-                    val index = listaAhorros.indexOfFirst { it.id == ahorroEnEdicion?.id }
+                    val index = listaAhorros.indexOfFirst { it.id == metaActual.id }
                     if (index != -1) {
-                        val p = nuevoPorcentajeEdicion.toFloatOrNull() ?: ahorroEnEdicion!!.porcentaje
-                        listaAhorros[index] = ahorroEnEdicion!!.copy(nombre = nuevoNombreEdicion, porcentaje = p)
+                        if (subModo == "GENERAL") {
+                            val p = nuevoPorcentaje.toFloatOrNull() ?: metaActual.porcentaje
+                            listaAhorros[index] = metaActual.copy(nombre = nuevoNombre, porcentaje = p)
+                        } else if (subModo == "CONVERTIR_INTERNO") {
+                            val salida = montoSalidaAho.toDoubleOrNull() ?: 0.0
+                            val entrada = montoEntradaAho.toDoubleOrNull() ?: 0.0
+                            val dispOrigen = when(origenAho) { TipoMoneda.LOCAL -> metaActual.acumuladoLocal; TipoMoneda.DIVISA -> metaActual.acumuladoDivisa; TipoMoneda.USDT -> metaActual.acumuladoUsdt }
+
+                            if (salida > 0 && entrada > 0 && salida <= dispOrigen && origenAho != destinoAho) {
+                                var temp = when(origenAho) {
+                                    TipoMoneda.LOCAL -> metaActual.copy(acumuladoLocal = metaActual.acumuladoLocal - salida)
+                                    TipoMoneda.DIVISA -> metaActual.copy(acumuladoDivisa = metaActual.acumuladoDivisa - salida)
+                                    TipoMoneda.USDT -> metaActual.copy(acumuladoUsdt = metaActual.acumuladoUsdt - salida)
+                                }
+                                temp = when(destinoAho) {
+                                    TipoMoneda.LOCAL -> temp.copy(acumuladoLocal = temp.acumuladoLocal + entrada)
+                                    TipoMoneda.DIVISA -> temp.copy(acumuladoDivisa = temp.acumuladoDivisa + entrada)
+                                    TipoMoneda.USDT -> temp.copy(acumuladoUsdt = temp.acumuladoUsdt + entrada)
+                                }
+                                listaAhorros[index] = temp
+                            } else {
+                                Toast.makeText(context, "Verifica los montos de conversión", Toast.LENGTH_SHORT).show()
+                            }
+                        } else {
+                            val l = corrLocal.toDoubleOrNull() ?: metaActual.acumuladoLocal
+                            val d = corrDivisa.toDoubleOrNull() ?: metaActual.acumuladoDivisa
+                            val u = corrUsdt.toDoubleOrNull() ?: metaActual.acumuladoUsdt
+                            listaAhorros[index] = metaActual.copy(acumuladoLocal = l, acumuladoDivisa = d, acumuladoUsdt = u)
+                        }
                         onGuardarCambios()
                     }
                     ahorroEnEdicion = null
-                }) { Text("Actualizar") }
+                }) { Text("Guardar") }
             },
             dismissButton = { TextButton(onClick = { ahorroEnEdicion = null }) { Text("Cancelar") } }
         )
@@ -1023,77 +1141,6 @@ fun VistaDetalleAhorros(
                 }) { Text("Confirmar Retiro a Saldo") }
             },
             dismissButton = { TextButton(onClick = { ahorroParaRetiro = null }) { Text("Cancelar") } }
-        )
-    }
-
-    if (ahorroParaConvertir != null) {
-        val meta = ahorroParaConvertir!!
-        AlertDialog(
-            onDismissRequest = { ahorroParaConvertir = null },
-            title = { Text("Convertir ahorros en ${meta.nombre}") },
-            text = {
-                Column {
-                    Text(text = "Desde Moneda:", style = MaterialTheme.typography.bodyMedium)
-                    TipoMoneda.values().forEach { m ->
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            RadioButton(selected = origenConvertir == m, onClick = { origenConvertir = m })
-                            Text(text = m.etiqueta)
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(text = "Hacia Moneda:", style = MaterialTheme.typography.bodyMedium)
-                    TipoMoneda.values().forEach { m ->
-                        if (m != origenConvertir) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                RadioButton(selected = destinoConvertir == m, onClick = { destinoConvertir = m })
-                                Text(text = m.etiqueta)
-                            }
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(value = montoConvertirInput, onValueChange = { montoConvertirInput = it }, label = { Text("Monto a convertir") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done))
-                    Spacer(modifier = Modifier.height(8.dp))
-                    OutlinedTextField(value = tasaConvertirInput, onValueChange = { tasaConvertirInput = it }, label = { Text("Tasa (1 ${origenConvertir.simbolo} = ? ${destinoConvertir.simbolo})") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done))
-                }
-            },
-            confirmButton = {
-                Button(onClick = {
-                    val montoOrigen = montoConvertirInput.toDoubleOrNull() ?: 0.0
-                    val tasa = tasaConvertirInput.toDoubleOrNull() ?: 0.0
-
-                    val disponibleOrigen = when (origenConvertir) {
-                        TipoMoneda.LOCAL -> meta.acumuladoLocal
-                        TipoMoneda.DIVISA -> meta.acumuladoDivisa
-                        TipoMoneda.USDT -> meta.acumuladoUsdt
-                    }
-
-                    if (montoOrigen > 0 && montoOrigen <= disponibleOrigen && tasa > 0) {
-                        val montoDestino = montoOrigen * tasa
-                        val index = listaAhorros.indexOfFirst { it.id == meta.id }
-
-                        if (index != -1) {
-                            var temp = when (origenConvertir) {
-                                TipoMoneda.LOCAL -> meta.copy(acumuladoLocal = meta.acumuladoLocal - montoOrigen)
-                                TipoMoneda.DIVISA -> meta.copy(acumuladoDivisa = meta.acumuladoDivisa - montoOrigen)
-                                TipoMoneda.USDT -> meta.copy(acumuladoUsdt = meta.acumuladoUsdt - montoOrigen)
-                            }
-
-                            temp = when (destinoConvertir) {
-                                TipoMoneda.LOCAL -> temp.copy(acumuladoLocal = temp.acumuladoLocal + montoDestino)
-                                TipoMoneda.DIVISA -> temp.copy(acumuladoDivisa = temp.acumuladoDivisa + montoDestino)
-                                TipoMoneda.USDT -> temp.copy(acumuladoUsdt = temp.acumuladoUsdt + montoDestino)
-                            }
-
-                            listaAhorros[index] = temp
-                            onGuardarCambios()
-                        }
-                        ahorroParaConvertir = null
-                    } else {
-                        Toast.makeText(context, "Verifica el monto o tasa", Toast.LENGTH_SHORT).show()
-                    }
-                }) { Text("Ejecutar Cambio") }
-            },
-            dismissButton = { TextButton(onClick = { ahorroParaConvertir = null }) { Text("Cancelar") } }
         )
     }
 }
@@ -1221,7 +1268,6 @@ fun VistaDetalleGastos(
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done)
                         )
                     } else {
-                        // AQUÍ ESTÁ EL CAMBIO DEL CAJÓN TÁCTIL (BOX + CLICKABLE)
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -1439,8 +1485,7 @@ fun VistaDetalleConsumos(
             Spacer(modifier = Modifier.height(16.dp))
 
             LazyColumn(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(listaConsumos, key = { it.id }) { consumo ->
-                    Card(modifier = Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
+                items(listaConsumos.reversed(), key = { it.id }) { consumo ->                    Card(modifier = Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
                         Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
                             Text(text = consumo.nombre, style = MaterialTheme.typography.titleMedium)
                             Text(text = "Monto: ${consumo.moneda.simbolo}${consumo.monto}", style = MaterialTheme.typography.bodyMedium)
@@ -1510,7 +1555,8 @@ fun TarjetaConsumoResumen(totalConsumido: Double, listaConsumos: List<ConsumoIte
                 Text(text = "Registros: ${listaConsumos.size}", style = MaterialTheme.typography.bodyMedium, color = Color.White.copy(alpha = 0.9f))
             }
             Column(modifier = Modifier.weight(1f).fillMaxWidth().padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                for (consumo in listaConsumos.take(3)) {
+                // Aquí aplicamos .reversed() para que lo último que registraste salga arriba
+                for (consumo in listaConsumos.reversed().take(3)) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(text = consumo.nombre, color = Color.White, style = MaterialTheme.typography.bodySmall)
                         Text(text = "${consumo.moneda.simbolo}${consumo.monto}", color = Color.White, style = MaterialTheme.typography.bodySmall)
