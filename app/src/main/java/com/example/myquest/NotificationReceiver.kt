@@ -10,25 +10,32 @@ import androidx.core.app.NotificationCompat
 
 class NotificationReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        val titulo = intent.getStringExtra("TITULO") ?: "Recordatorio de Pago"
-        val mensaje = intent.getStringExtra("MENSAJE") ?: "Tienes un pago pendiente próximo."
+        val titulo = intent.getStringExtra("titulo") ?: "Recordatorio de Pago"
+        val mensaje = intent.getStringExtra("mensaje") ?: "Tienes un gasto o deuda próxima a vencer."
+        val notifId = intent.getIntExtra("notif_id", System.currentTimeMillis().toInt())
 
+        val channelId = "myquest_deudas_channel"
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        val channelId = "myquest_canal_recordatorios"
 
+        // Crear canal de notificación para Android 8.0+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(channelId, "Recordatorios MyQuest", NotificationManager.IMPORTANCE_HIGH)
+            val channel = NotificationChannel(
+                channelId,
+                "Recordatorios de Deudas y Gastos",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Notificaciones para pagos y gastos fijos próximos a vencer"
+            }
             notificationManager.createNotificationChannel(channel)
         }
 
-        val notification = NotificationCompat.Builder(context, channelId)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+        val builder = NotificationCompat.Builder(context, channelId)
+            .setSmallIcon(android.R.drawable.ic_dialog_info) // Puedes cambiarlo por un ícono propio si lo deseas
             .setContentTitle(titulo)
             .setContentText(mensaje)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
-            .build()
 
-        notificationManager.notify(System.currentTimeMillis().toInt(), notification)
+        notificationManager.notify(notifId, builder.build())
     }
 }

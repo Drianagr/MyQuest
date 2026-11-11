@@ -1,7 +1,10 @@
 package com.example.myquest
 
+import android.app.AlarmManager
 import android.app.DatePickerDialog
+import android.app.PendingIntent
 import android.content.Context
+import android.content.Intent
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -99,7 +102,7 @@ data class ConsumoItem(
     val timestamp: Long = System.currentTimeMillis()
 )
 
-// --- UTILIDAD DE ALMACENAMIENTO PERSISTENTE ---
+// --- UTILIDAD DE ALMACENAMIENTO PERSISTENTE Y ALARMAS ---
 object StorageUtil {
     private const val PREF_NAME = "myquest_prefs"
     private const val KEY_SALDOS_MULTI = "key_saldos_multi"
@@ -186,6 +189,8 @@ object StorageUtil {
             jsonArray.put(obj)
         }
         prefs.edit().putString(KEY_GASTOS, jsonArray.toString()).apply()
+
+
     }
 
     fun cargarGastos(context: Context): List<GastoItem> {
@@ -259,6 +264,79 @@ object StorageUtil {
             }
         } catch (_: Exception) {}
         return lista
+    }
+
+    // --- PROGRAMAR ALARMAS EN SEGUNDO PLANO (3 DÍAS Y 1 DÍA ANTES) ---
+    fun programarAlarmasGastos(context: Context, listaGastos: List<GastoItem>) {
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+
+        for (gasto in listaGastos) {
+            val pendiente = gasto.montoTotal - gasto.montoPagado
+            if (pendiente <= 0) continue // Si ya está pagado por completo, no programar alarma
+
+            val calendarVencimiento = Calendar.getInstance()
+
+            if (gasto.esFijo) {
+                val diaFijo = gasto.fechaPago.toIntOrNull() ?: 1
+                val hoy = Calendar.getInstance()
+                calendarVencimiento.set(Calendar.DAY_OF_MONTH, diaFijo)
+                calendarVencimiento.set(Calendar.HOUR_OF_DAY, 9) // A las 9:00 AM
+                calendarVencimiento.set(Calendar.MINUTE, 0)
+                calendarVencimiento.set(Calendar.SECOND, 0)
+
+                if (calendarVencimiento.before(hoy)) {
+                    calendarVencimiento.add(Calendar.MONTH, 1)
+                }
+            } else {
+                try {
+                    val date = sdf.parse(gasto.fechaPago)
+                    if (date != null) {
+                        calendarVencimiento.time = date
+                        calendarVencimiento.set(Calendar.HOUR_OF_DAY, 9)
+                        calendarVencimiento.set(Calendar.MINUTE, 0)
+                        calendarVencimiento.set(Calendar.SECOND, 0)
+                    }
+                } catch (_: Exception) {
+                    continue
+                }
+            }
+
+            val baseId = try { gasto.id.toLong().toInt() } catch (_: Exception) { gasto.id.hashCode() }
+
+            // Alarma 3 días antes
+            val cal3Dias = calendarVencimiento.clone() as Calendar
+            cal3Dias.add(Calendar.DAY_OF_YEAR, -3)
+            if (cal3Dias.timeInMillis > System.currentTimeMillis()) {
+                dispararAlarma(context, alarmManager, cal3Dias.timeInMillis, baseId + 3, "Recordatorio de Pago", "Faltan 3 días para pagar: ${gasto.nombre} (${gasto.moneda.simbolo}$pendiente)")
+            }
+
+            // Alarma 1 día antes
+            val cal1Dia = calendarVencimiento.clone() as Calendar
+            cal1Dia.add(Calendar.DAY_OF_YEAR, -1)
+            if (cal1Dia.timeInMillis > System.currentTimeMillis()) {
+                dispararAlarma(context, alarmManager, cal1Dia.timeInMillis, baseId + 1, "¡Vence Mañana!", "Mañana es el límite de pago para: ${gasto.nombre} (${gasto.moneda.simbolo}$pendiente)")
+            }
+        }
+    }
+
+    private fun dispararAlarma(context: Context, alarmManager: AlarmManager, tiempoMillis: Long, requestCode: Int, titulo: String, mensaje: String) {
+        val intent = Intent(context, NotificationReceiver::class.java).apply {
+            putExtra("titulo", titulo)
+            putExtra("mensaje", mensaje)
+            putExtra("notif_id", requestCode)
+        }
+        val pendingIntent = PendingIntent.getBroadcast(
+            context,
+            requestCode,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        try {
+            alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, tiempoMillis, pendingIntent)
+        } catch (_: SecurityException) {
+            alarmManager.set(AlarmManager.RTC_WAKEUP, tiempoMillis, pendingIntent)
+        }
     }
 }
 
@@ -519,7 +597,6 @@ fun PantallaEconomia() {
         }
     }
 
-    // DIÁLOGO GENERAL DE EDICIÓN / INTERCAMBIO DIRECTO (Saldos)
     if (mostrarDialogoConvertidorGeneral) {
         DialogoEdicionSaldos(
             saldosActuales = saldos,
@@ -678,6 +755,8 @@ fun PantallaEconomia() {
                         )
                         mostrarDialogoAgregarGasto = false
                         guardarTodo()
+                        StorageUtil.programarAlarmasGastos(context, listaGastos)
+
                     } else {
                         Toast.makeText(context, "Por favor completa todos los campos", Toast.LENGTH_SHORT).show()
                     }
@@ -766,7 +845,7 @@ fun DialogoEdicionSaldos(
     onGuardarCambiosDirectos: (SaldosMultiMoneda) -> Unit,
     onConfirmarCambio: (origen: TipoMoneda, destino: TipoMoneda, montoSalida: Double, montoEntrada: Double) -> Unit
 ) {
-    var modo by remember { mutableStateOf("INTERCAMBIO") } // "INTERCAMBIO" o "EDITAR_DIRECTO"
+    var modo by remember { mutableStateOf("INTERCAMBIO") }
 
     var origen by remember { mutableStateOf(TipoMoneda.LOCAL) }
     var destino by remember { mutableStateOf(TipoMoneda.DIVISA) }
@@ -871,9 +950,7 @@ fun VistaDetalleAhorros(
     var nombreInput by remember { mutableStateOf("") }
     var porcentajeInput by remember { mutableStateOf("") }
 
-    // Estado para el botón "Editar" en Ahorros (Mantiene el nombre exacto "Editar")
     var ahorroEnEdicion by remember { mutableStateOf<AhorroItem?>(null) }
-
     var ahorroParaAbono by remember { mutableStateOf<AhorroItem?>(null) }
     var montoAbonoInput by remember { mutableStateOf("") }
     var monedaAbonoSeleccionada by remember { mutableStateOf(TipoMoneda.DIVISA) }
@@ -907,7 +984,6 @@ fun VistaDetalleAhorros(
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                                 TextButton(onClick = { ahorroParaRetiro = ahorro; montoRetiroInput = "" }) { Text("Retirar", color = Color(0xFFE53935)) }
                                 TextButton(onClick = { ahorroParaAbono = ahorro; montoAbonoInput = "" }) { Text("Abonar") }
-                                // Botón que mantiene el nombre de "Editar"
                                 TextButton(onClick = { ahorroEnEdicion = ahorro }) { Text("Editar") }
                                 TextButton(onClick = { onEliminar(ahorro) }) { Text("Eliminar", color = Color.Red) }
                             }
@@ -945,10 +1021,9 @@ fun VistaDetalleAhorros(
         )
     }
 
-    // DIÁLOGO DE EDICIÓN PARA EL AHORRO SELECCIONADO (Nombre, % y conversión interna o corrección de montos)
     if (ahorroEnEdicion != null) {
         val metaActual = ahorroEnEdicion!!
-        var subModo by remember { mutableStateOf("GENERAL") } // "GENERAL" o "CONVERTIR_INTERNO" o "CORREGIR_MONTOS"
+        var subModo by remember { mutableStateOf("GENERAL") }
 
         var nuevoNombre by remember { mutableStateOf(metaActual.nombre) }
         var nuevoPorcentaje by remember { mutableStateOf(metaActual.porcentaje.toString()) }
@@ -1453,6 +1528,7 @@ fun VistaDetalleGastos(
                             }
 
                             onGuardarCambios()
+                            StorageUtil.programarAlarmasGastos(context, listaGastos)
                             gastoParaPagar = null
                         }
                     }
@@ -1485,7 +1561,8 @@ fun VistaDetalleConsumos(
             Spacer(modifier = Modifier.height(16.dp))
 
             LazyColumn(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(listaConsumos.reversed(), key = { it.id }) { consumo ->                    Card(modifier = Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
+                items(listaConsumos.reversed(), key = { it.id }) { consumo ->
+                    Card(modifier = Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)) {
                         Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
                             Text(text = consumo.nombre, style = MaterialTheme.typography.titleMedium)
                             Text(text = "Monto: ${consumo.moneda.simbolo}${consumo.monto}", style = MaterialTheme.typography.bodyMedium)
@@ -1555,7 +1632,6 @@ fun TarjetaConsumoResumen(totalConsumido: Double, listaConsumos: List<ConsumoIte
                 Text(text = "Registros: ${listaConsumos.size}", style = MaterialTheme.typography.bodyMedium, color = Color.White.copy(alpha = 0.9f))
             }
             Column(modifier = Modifier.weight(1f).fillMaxWidth().padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                // Aquí aplicamos .reversed() para que lo último que registraste salga arriba
                 for (consumo in listaConsumos.reversed().take(3)) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text(text = consumo.nombre, color = Color.White, style = MaterialTheme.typography.bodySmall)
