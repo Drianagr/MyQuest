@@ -4,7 +4,9 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -14,6 +16,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationDrawerItem
+import androidx.compose.material3.NavigationDrawerItemDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -53,7 +56,7 @@ fun PantallaPrincipal() {
     val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
     val scope = rememberCoroutineScope()
 
-    // Estado para recordar qué pestaña está activa ("INICIO" o "ECONOMIA")
+    // Estado unificado para controlar qué pestaña está activa
     var pantallaActual by remember { mutableStateOf("INICIO") }
 
     ModalNavigationDrawer(
@@ -62,20 +65,43 @@ fun PantallaPrincipal() {
             ModalDrawerSheet {
                 Text(
                     text = "Menú Principal",
-                    modifier = Modifier.padding(16.dp),
-                    style = MaterialTheme.typography.titleLarge
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.padding(16.dp)
                 )
                 HorizontalDivider()
+                Spacer(modifier = Modifier.height(8.dp))
 
-                // Opción del menú lateral para ir a Economía
+                // Opción para ir al Panel Principal
                 NavigationDrawerItem(
-                    label = { Text("Economía") },
+                    label = { Text(text = "Inicio / Panel") },
+                    selected = pantallaActual == "INICIO",
+                    onClick = {
+                        pantallaActual = "INICIO"
+                        scope.launch { drawerState.close() }
+                    },
+                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                )
+
+                // Opción de Tareas (arriba)
+                NavigationDrawerItem(
+                    label = { Text(text = "Tareas") },
+                    selected = pantallaActual == "TAREAS",
+                    onClick = {
+                        pantallaActual = "TAREAS"
+                        scope.launch { drawerState.close() }
+                    },
+                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                )
+
+                // Opción de Economía (abajo)
+                NavigationDrawerItem(
+                    label = { Text(text = "Economía") },
                     selected = pantallaActual == "ECONOMIA",
                     onClick = {
-                        pantallaActual = "ECONOMIA" // Cambiamos la pantalla activa
-                        scope.launch { drawerState.close() } // Cerramos el menú
+                        pantallaActual = "ECONOMIA"
+                        scope.launch { drawerState.close() }
                     },
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                 )
             }
         }
@@ -85,7 +111,12 @@ fun PantallaPrincipal() {
                 TopAppBar(
                     // Cambia el título de la barra superior según la sección
                     title = {
-                        Text(if (pantallaActual == "ECONOMIA") "myQuest - Economía" else "myQuest")
+                        val titulo = when (pantallaActual) {
+                            "ECONOMIA" -> "myQuest - Economía"
+                            "TAREAS" -> "myQuest - Tareas"
+                            else -> "myQuest"
+                        }
+                        Text(titulo)
                     },
                     // Botón de tres rayas (hamburguesa) para abrir el menú
                     navigationIcon = {
@@ -106,16 +137,20 @@ fun PantallaPrincipal() {
                     .fillMaxSize()
                     .padding(paddingInterno)
             ) {
-                if (pantallaActual == "ECONOMIA") {
-                    // Llamamos a la pantalla de economía que está en su propio archivo
-                    PantallaEconomia()
-                } else {
-                    Text(
-                        text = "Toca el botón ☰ o desliza desde la izquierda",
-                        modifier = Modifier.padding(16.dp)
-                    )
+                when (pantallaActual) {
+                    "ECONOMIA" -> PantallaEconomia()
+                    "TAREAS" -> {
+                        // ✅ Llamamos a la pantalla real de tareas
+                        TareaScreen()
+                    }
+                    else -> {
+                        Text(
+                            text = "Toca el botón ☰ o desliza desde la izquierda",
+                            modifier = Modifier.padding(16.dp)
+                        )
+                    }
                 }
             }
         }
     }
-} // <--- Única llave de cierre para PantallaPrincipal
+}

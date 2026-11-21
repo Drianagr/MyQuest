@@ -2,7 +2,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- 1. Agrega estos permisos aquí arriba, fuera de application -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
 
@@ -16,8 +15,13 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.MyQuest">
 
-        <!-- 2. Corrígela aquí dentro sin extensión .kt ni comillas -->
-        <receiver android:name=".NotificationReceiver" android:exported="false" />
+        <receiver
+            android:name=".NotificationReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name=".TareaNotificacionReceiver"
+            android:exported="false" />
 
         <activity
             android:name=".MainActivity"
